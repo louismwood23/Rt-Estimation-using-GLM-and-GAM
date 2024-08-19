@@ -1,0 +1,100 @@
+# Description:
+# This function allows the user to generate an estimation of the time-dependent 
+# reproduction number through a generalised linear model. 
+
+# Inputs:
+# data - dataset, the dataset you wish to evaluate
+# model - 1 or 2, select the glm model to run, model 2 uses an offset unlike model 1.
+# tw - int, select the time-window you wis to use to generate the mean values of Rt.
+# overlapping - TRUE or FALSE, select whether you would like a sliding time window,
+#               1 day time step, or non-overlapping time windows with 
+#               completely discrete Rt averages.
+# Outputs:
+# Produces a dateframe containing predicted values (mean) as well as upper and lower values determined by a 95% confidence 
+# interval
+# 
+# example
+# 
+
+GLM_Estim <- function(data, model, tw, overlapping){
+  # storing incidence, time, oi into df
+  
+  data_infer <- data.frame(t = 1:length(data$incidence) , 
+                           I = c(data$incidence),
+                           OI = overall_infectivity(data$incidence, data$si_distr))
+  data_infer$logOI <- log(data_infer$OI)
+  
+  # sliding time windows for glm
+  tw1 = tw - 1
+  t_max = nrow(data_infer)
+  t_start = seq(1, t_max-tw) 
+  t_end = t_start + tw1
+  n_tw = length(t_start)
+
+  if(overlapping == TRUE){ 
+    Fi_idx_inc <- function(x) {
+    return(x[1]:x[2])}
+  
+  idx <- c(apply(cbind(t_start, t_end), 1, Fi_idx_inc))
+  data_infer <- data_infer[-1,]
+  data_long <- data_infer[idx, ]
+  # below, 'each = tw + 1' was added to align the df lengths
+  data_long$R_id <- rep(seq(1, n_tw), each = tw1+1)
+  data_long$Rt <- ceiling(nrow(data_long)/tw)
+  data_long$Rt[ 1:(floor(nrow(data_long)/tw)*tw) ] <- rep(1:floor(nrow(data_long)/tw),each = tw)
+  data_long$Rt <- as.character(data_long$Rt)
+  
+  m1 <- glm(I ~ 0+Rt:OI, family= poisson(link='identity'), data = data_long)
+  m2 <- glm(I ~ 0+Rt+offset(logOI), 
+            family= poisson(link='log'), 
+            data = data_long)
+  # deciding the model to run in function
+    if(model < 2){
+      pred <- predict.glm(object = m1 , se.fit = TRUE)
+      data_long$m1_pred <- pred$fit / data_long$OI
+      data_long$m1_low <- (pred$fit - 1.96*pred$se.fit) / data_long$OI
+      data_long$m1_high <- (pred$fit + 1.96*pred$se.fit) / data_long$OI
+      data_long$Rt_diff <- (data_long$m1_high - data_long$m1_low)
+    return(data_long)}
+  
+    else if(model > 1){
+      pred2 <- predict.glm(object = m2 , se.fit = TRUE)
+      data_long$m2_pred <- exp(pred2$fit) / data_long$OI
+      data_long$m2_low <- exp((pred2$fit) - 1.96*pred2$se.fit) / data_long$OI
+      data_long$m2_high <- exp((pred2$fit) + 1.96*pred2$se.fit) / data_long$OI
+      data_long$Rt_diff <- (data_long$m2_high - data_long$m2_low)
+    return(data_long)}
+  return(data_long)}
+  
+  else if(overlapping == FALSE){
+      
+      data_short <- data_infer[-1,]
+      
+      data_short$Rt <- ceiling(nrow(data_short)/tw)
+      data_short$Rt[ 1:(floor(nrow(data_short)/tw)*tw) ] <- rep(1:floor(nrow(data_short)/tw),each = tw)
+      data_short$Rt <- as.character(data_short$Rt)
+      data_short$R_id <- data_short$Rt
+      
+      m1_2 <- glm(I ~ 0+Rt:OI, family= poisson(link='identity'), data = data_short)
+      m2_2 <- glm(I ~ 0+Rt+offset(logOI), 
+                family= poisson(link='log'), 
+                data = data_short)
+      # deciding which  model to run in function
+    
+      if(model < 2){
+        pred <- predict.glm(object = m1_2 , se.fit = TRUE)
+        data_short$m1_pred <- pred$fit / data_short$OI
+        data_short$m1_low <- (pred$fit - 1.96*pred$se.fit) / data_short$OI
+        data_short$m1_high <- (pred$fit + 1.96*pred$se.fit) / data_short$OI
+        data_short$Rt_diff <- (data_short$m1_high - data_short$m1_low)
+      return(data_short)}
+      
+      else if(model > 1){
+        pred2 <- predict.glm(object = m2_2 , se.fit = TRUE)
+        data_short$m2_pred <- exp(pred2$fit) / data_short$OI
+        data_short$m2_low <- exp((pred2$fit) - 1.96*pred2$se.fit) / data_short$OI
+        data_short$m2_high <- exp((pred2$fit) + 1.96*pred2$se.fit) / data_short$OI
+        data_short$Rt_diff <- (data_short$m2_high - data_short$m2_low)
+      return(data_short)}
+    return(data_short)}
+}
